@@ -1,0 +1,38 @@
+{
+  "name": "ATS Close Expired Jobs",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "15 0 * * *" }]
+        }
+      },
+      "id": "daily-close",
+      "name": "Daily midnight",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/api/internal/close-expired-jobs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "X-Internal-Secret", "value": "change-me-internal-secret" }]
+        },
+        "options": {}
+      },
+      "id": "close-jobs",
+      "name": "Close expired jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 0]
+    }
+  ],
+  "connections": {
+    "Daily midnight": { "main": [[{ "node": "Close expired jobs", "type": "main", "index": 0 }]] }
+  },
+  "active": true,
+  "settings": { "executionOrder": "v1" }
+}

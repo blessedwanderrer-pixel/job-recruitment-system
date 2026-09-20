@@ -1,0 +1,129 @@
+:root {
+  --ink: #1c2421;
+  --pine: #1f4d3a;
+  --leaf: #2f6f52;
+  --copper: #b45a28;
+  --sand: #f4efe6;
+  --paper: #fffdf8;
+  --line: #d9d0c3;
+  --muted: #5d675f;
+  --danger: #9b2335;
+  --ok: #1f6b43;
+  --shadow: 0 18px 40px rgba(28, 36, 33, 0.08);
+  font-family: 'Source Sans 3', sans-serif;
+  color: var(--ink);
+  background: var(--sand);
+  line-height: 1.45;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { min-height: 100%; margin: 0; }
+body { background: radial-gradient(circle at top left, #efe6d6, var(--sand) 42%); }
+
+h1, h2, .brand strong {
+  font-family: Fraunces, Georgia, serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+h1 { font-size: clamp(1.8rem, 4vw, 2.6rem); margin: 0 0 0.4rem; }
+h2 { font-size: 1.15rem; margin: 1rem 0 0.4rem; }
+
+a { color: var(--pine); }
+button, .btn-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  background: var(--pine);
+  color: white;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.7rem 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+button.danger { background: var(--danger); }
+button.text-btn, .text-btn {
+  background: transparent;
+  color: var(--pine);
+  padding: 0.2rem 0;
+  border-radius: 0;
+}
+button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.app-shell { min-height: 100vh; }
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  background: var(--ink);
+  color: white;
+}
+.brand { display: flex; gap: 0.5rem; align-items: baseline; }
+.brand span { color: #d7b38c; font-size: 0.92rem; }
+.topbar nav { display: flex; flex-wrap: wrap; gap: 0.9rem; }
+.topbar a { color: #f4efe6; text-decoration: none; }
+.topbar a.active { color: #e7b07a; }
+.session { display: flex; gap: 0.8rem; align-items: center; font-size: 0.92rem; }
+.session .text-btn { color: #e7b07a; }
+
+.page {
+  width: min(1100px, calc(100% - 2rem));
+  margin: 1.5rem auto 3rem;
+}
+.auth-card, .card, .panel {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 1.2rem;
+  box-shadow: var(--shadow);
+}
+.auth-card { max-width: 460px; margin: 2rem auto; }
+.eyebrow { text-transform: uppercase; letter-spacing: 0.12em; color: var(--copper); font-size: 0.78rem; margin: 0 0 0.3rem; }
+.lede, .muted { color: var(--muted); }
+.stack { display: grid; gap: 0.8rem; }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
+.heading-row { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.field { display: grid; gap: 0.3rem; margin: 0.7rem 0; font-weight: 600; }
+.field input, .field select, .field textarea {
+  font: inherit;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: white;
+}
+.field textarea { min-height: 110px; }
+.banner { padding: 0.75rem 0.9rem; border-radius: 12px; }
+.banner.error { background: #f8e4e6; color: var(--danger); }
+.banner.success { background: #e5f4ea; color: var(--ok); }
+.table-wrap { overflow-x: auto; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 0.8rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+.pill {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: #ece6db;
+  font-size: 0.85rem;
+}
+.pill.hired, .pill.offer { background: #dcefe3; }
+.pill.rejected, .pill.withdrawn { background: #f3e0e3; }
+.pill.interview, .pill.shortlisted { background: #efe3d4; }
+.split { display: grid; grid-template-columns: 1.4fr 0.8fr; gap: 1rem; }
+.actions { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.check { display: flex; gap: 0.5rem; align-items: center; font-weight: 500; margin: 0.35rem 0; }
+.prose { white-space: pre-wrap; }
+
+@media (max-width: 800px) {
+  .split { grid-template-columns: 1fr; }
+  .topbar { align-items: flex-start; }
+  .session { width: 100%; justify-content: space-between; }
+  .heading-row { flex-wrap: wrap; align-items: flex-start; }
+  table { font-size: 0.92rem; }
+  th, td { padding: 0.65rem 0.55rem; }
+  button, .btn-link { width: auto; min-height: 2.6rem; }
+}

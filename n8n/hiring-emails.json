@@ -1,0 +1,135 @@
+{
+  "name": "ATS Hiring Emails",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ats-emails",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-ats-emails",
+      "name": "Email webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "ats-emails"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            { "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "leftValue": "={{ $json.type }}", "rightValue": "application_received", "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "received" },
+            { "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "leftValue": "={{ $json.type }}", "rightValue": "interview_invitation", "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "interview" },
+            { "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "leftValue": "={{ $json.type }}", "rightValue": "hired", "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "hired" },
+            { "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "leftValue": "={{ $json.type }}", "rightValue": "rejected", "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "rejected" },
+            { "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" }, "conditions": [{ "leftValue": "={{ $json.type }}", "rightValue": "recruiter_invite", "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "invite" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "switch-email-type",
+      "name": "Email type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "fromEmail": "hiring@nowsheradigital.com",
+        "toEmail": "={{ $json.to }}",
+        "subject": "We received your application",
+        "text": "=Hello {{ $json.candidate_name }},\n\nWe received your application for {{ $json.job_title }} at Nowshera Digital.\n\nYou can track the stage of your application after you sign in.\n"
+      },
+      "id": "email-received",
+      "name": "Application received",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [520, -200],
+      "credentials": { "smtp": { "id": "XsybLVNA9seWlUPl", "name": "SMTP account" } }
+    },
+    {
+      "parameters": {
+        "fromEmail": "hiring@nowsheradigital.com",
+        "toEmail": "={{ $json.to }}",
+        "subject": "Interview invitation",
+        "text": "=Hello {{ $json.candidate_name }},\n\nYou are invited to a 1-hour interview for {{ $json.job_title }}.\n\nWhen: {{ $json.starts_at }}\nLocation: {{ $json.location || 'n/a' }}\nMeeting link: {{ $json.meeting_link || 'n/a' }}\n"
+      },
+      "id": "email-interview",
+      "name": "Interview invitation",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [520, -40],
+      "credentials": { "smtp": { "id": "XsybLVNA9seWlUPl", "name": "SMTP account" } }
+    },
+    {
+      "parameters": {
+        "fromEmail": "hiring@nowsheradigital.com",
+        "toEmail": "={{ $json.to }}",
+        "subject": "You have been hired",
+        "text": "=Hello {{ $json.candidate_name }},\n\nCongratulations. You have been hired for {{ $json.job_title }} at Nowshera Digital.\n"
+      },
+      "id": "email-hired",
+      "name": "Hired",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [520, 120],
+      "credentials": { "smtp": { "id": "XsybLVNA9seWlUPl", "name": "SMTP account" } }
+    },
+    {
+      "parameters": {
+        "fromEmail": "hiring@nowsheradigital.com",
+        "toEmail": "={{ $json.to }}",
+        "subject": "Update on your application",
+        "text": "=Hello {{ $json.candidate_name }},\n\nThank you for applying for {{ $json.job_title }}. We will not be moving forward with your application.\n"
+      },
+      "id": "email-rejected",
+      "name": "Rejected",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [520, 280],
+      "credentials": { "smtp": { "id": "XsybLVNA9seWlUPl", "name": "SMTP account" } }
+    },
+    {
+      "parameters": {
+        "fromEmail": "hiring@nowsheradigital.com",
+        "toEmail": "={{ $json.to }}",
+        "subject": "Set your Nowshera Digital recruiter password",
+        "text": "=Hello {{ $json.full_name }},\n\nAn admin added you as a recruiter. Set your password using this link:\n{{ $json.set_password_link }}\n"
+      },
+      "id": "email-invite",
+      "name": "Recruiter invite",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [520, 440],
+      "credentials": { "smtp": { "id": "XsybLVNA9seWlUPl", "name": "SMTP account" } }
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "={ \"ok\": true }" },
+      "id": "respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [780, 120]
+    }
+  ],
+  "connections": {
+    "Email webhook": { "main": [[{ "node": "Email type", "type": "main", "index": 0 }]] },
+    "Email type": {
+      "main": [
+        [{ "node": "Application received", "type": "main", "index": 0 }],
+        [{ "node": "Interview invitation", "type": "main", "index": 0 }],
+        [{ "node": "Hired", "type": "main", "index": 0 }],
+        [{ "node": "Rejected", "type": "main", "index": 0 }],
+        [{ "node": "Recruiter invite", "type": "main", "index": 0 }]
+      ]
+    },
+    "Application received": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] },
+    "Interview invitation": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] },
+    "Hired": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] },
+    "Rejected": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] },
+    "Recruiter invite": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "active": true,
+  "settings": { "executionOrder": "v1" }
+}
