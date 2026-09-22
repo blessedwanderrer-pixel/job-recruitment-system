@@ -299,6 +299,9 @@ class SupabaseStore:
         rows = self._rest("GET", "job_recruiters", params={"job_id": f"eq.{job_id}", "select": "recruiter_id"}) or []
         return [r["recruiter_id"] for r in rows]
 
+    def list_job_recruiter_links(self) -> list[dict[str, Any]]:
+        return self._rest("GET", "job_recruiters", params={"select": "recruiter_id"}) or []
+
     def unassign_recruiter(self, recruiter_id: str) -> int:
         links = self._rest("GET", "job_recruiters", params={"recruiter_id": f"eq.{recruiter_id}", "select": "job_id"}) or []
         if links:

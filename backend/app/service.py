@@ -172,20 +172,23 @@ class HiringService:
 
     def list_recruiters(self, actor: dict[str, Any]) -> list[dict[str, Any]]:
         require_role(actor, ADMIN)
-        rows = []
-        for profile in self.store.list_profiles(RECRUITER):
-            assigned = self.store.jobs_for_recruiter(profile["id"])
-            rows.append(
-                {
-                    "id": profile["id"],
-                    "full_name": profile["full_name"],
-                    "email": profile["email"],
-                    "role": profile["role"],
-                    "is_active": profile.get("is_active", True),
-                    "assigned_job_count": len(assigned),
-                }
-            )
-        return rows
+        profiles = self.store.list_profiles(RECRUITER)
+        counts: dict[str, int] = {}
+        for link in self.store.list_job_recruiter_links():
+            recruiter_id = link.get("recruiter_id")
+            if recruiter_id:
+                counts[recruiter_id] = counts.get(recruiter_id, 0) + 1
+        return [
+            {
+                "id": profile["id"],
+                "full_name": profile["full_name"],
+                "email": profile["email"],
+                "role": profile["role"],
+                "is_active": profile.get("is_active", True),
+                "assigned_job_count": counts.get(profile["id"], 0),
+            }
+            for profile in profiles
+        ]
 
     def create_recruiter(self, actor: dict[str, Any], full_name: str, email: str) -> dict[str, Any]:
         require_role(actor, ADMIN)
