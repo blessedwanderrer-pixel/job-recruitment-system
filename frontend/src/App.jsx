@@ -1,6 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth'
-import { LoginPage, SetPasswordPage, SignupPage } from './pages/AuthPages'
+import { LoginPage, RoleLoginPage, SetPasswordPage, SignupPage } from './pages/AuthPages'
 import { ApplicationsPage, CvPage, JobDetailPage, JobsPage } from './pages/CandidatePages'
 import { RecruiterApplicationPage, RecruiterJobPage, RecruiterJobsPage } from './pages/RecruiterPages'
 import {
@@ -10,15 +10,13 @@ import {
   AdminJobsPage,
   AdminRecruitersPage,
 } from './pages/AdminPages'
-import { RequireAuth, Shell } from './ui'
+import { GuestOnly, RequireAuth, Shell, roleHome } from './ui'
 
 function HomeRedirect() {
   const { loading, profile } = useAuth()
   if (loading) return <p className="muted">Loading…</p>
-  if (!profile) return <Navigate to="/login" replace />
-  if (profile.role === 'admin') return <Navigate to="/admin/dashboard" replace />
-  if (profile.role === 'recruiter') return <Navigate to="/recruiter/jobs" replace />
-  return <Navigate to="/jobs" replace />
+  if (!profile) return <LoginPage />
+  return <Navigate to={roleHome(profile.role)} replace />
 }
 
 function AppRoutes() {
@@ -26,9 +24,49 @@ function AppRoutes() {
     <Shell>
       <Routes>
         <Route path="/" element={<HomeRedirect />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/signup" element={<SignupPage />} />
+        <Route
+          path="/login"
+          element={
+            <GuestOnly>
+              <LoginPage />
+            </GuestOnly>
+          }
+        />
+        <Route
+          path="/admin/login"
+          element={
+            <GuestOnly>
+              <RoleLoginPage portal="admin" />
+            </GuestOnly>
+          }
+        />
+        <Route
+          path="/recruiter/login"
+          element={
+            <GuestOnly>
+              <RoleLoginPage portal="recruiter" />
+            </GuestOnly>
+          }
+        />
+        <Route
+          path="/candidate/login"
+          element={
+            <GuestOnly>
+              <RoleLoginPage portal="candidate" />
+            </GuestOnly>
+          }
+        />
+        <Route
+          path="/signup"
+          element={
+            <GuestOnly>
+              <SignupPage />
+            </GuestOnly>
+          }
+        />
         <Route path="/set-password" element={<SetPasswordPage />} />
+        <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
+        <Route path="/recruiter" element={<Navigate to="/recruiter/jobs" replace />} />
         <Route
           path="/jobs"
           element={

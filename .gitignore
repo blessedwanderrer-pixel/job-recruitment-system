@@ -1,5 +1,6 @@
 .env
 .env.local
+.env.*.local
 frontend/.env
 backend/.env
 __pycache__/
@@ -11,3 +12,4 @@ frontend/node_modules/
 frontend/dist/
 *.pdf
 .DS_Store
+*.egg-info/

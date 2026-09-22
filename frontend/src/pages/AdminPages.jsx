@@ -2,22 +2,98 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, jobTypeLabel, stageLabel } from '../api'
 import { useAuth } from '../auth'
-import { Field, Message, useForm } from '../ui'
+import { ConfirmDialog, Field, Message, StatCounter, useForm } from '../ui'
 
 const STAGES = ['applied', 'shortlisted', 'interview', 'offer', 'hired', 'rejected', 'withdrawn']
 
 export function AdminDashboardPage() {
   const { token } = useAuth()
   const [rows, setRows] = useState([])
+  const [recruiters, setRecruiters] = useState([])
   const [error, setError] = useState('')
   useEffect(() => {
-    api('/api/admin/dashboard', { token }).then(setRows).catch((err) => setError(err.message))
+    Promise.all([api('/api/admin/dashboard', { token }), api('/api/admin/recruiters', { token })])
+      .then(([dash, recs]) => {
+        setRows(dash)
+        setRecruiters(recs)
+      })
+      .catch((err) => setError(err.message))
   }, [token])
+  const openJobs = rows.filter((r) => r.job.status === 'open').length
+  const totalApps = rows.reduce((sum, r) => sum + (r.total_applied || 0), 0)
+  const activeRecruiters = recruiters.filter((r) => r.is_active).length
   return (
-    <section>
+    <section className="stack dashboard-scene">
       <h1>Hiring dashboard</h1>
       <p className="lede">Application counts per job and stage, including withdrawn.</p>
       <Message error={error} />
+      <div className="stat-grid">
+        <article className="card card-premium stat-card">
+          <p className="eyebrow">Jobs</p>
+          <p className="stat-value">
+            <StatCounter value={rows.length} />
+          </p>
+          <p className="muted">All drafts, open, and closed roles</p>
+        </article>
+        <article className="card card-premium stat-card">
+          <p className="eyebrow">Open now</p>
+          <p className="stat-value">
+            <StatCounter value={openJobs} />
+          </p>
+          <p className="muted">Accepting applications</p>
+        </article>
+        <article className="card card-premium stat-card">
+          <p className="eyebrow">Applications</p>
+          <p className="stat-value">
+            <StatCounter value={totalApps} />
+          </p>
+          <p className="muted">Across every job and stage</p>
+        </article>
+        <article className="card card-premium stat-card">
+          <p className="eyebrow">Recruiters</p>
+          <p className="stat-value">
+            <StatCounter value={activeRecruiters} />
+          </p>
+          <p className="muted">{recruiters.length} in the directory</p>
+        </article>
+      </div>
+      <div className="panel panel-premium">
+        <div className="heading-row">
+          <div>
+            <h2>Recruiters</h2>
+            <p className="muted">Add, deactivate, or delete recruiters. Hiring history is kept.</p>
+          </div>
+          <Link className="btn-link" to="/admin/recruiters">
+            Manage recruiters
+          </Link>
+        </div>
+        {recruiters.length === 0 ? (
+          <p className="muted">No recruiters yet. Add one from Recruiter management.</p>
+        ) : (
+          <div className="table-wrap compact">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Status</th>
+                  <th>Assigned jobs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recruiters.slice(0, 5).map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.full_name}</td>
+                    <td>{row.email}</td>
+                    <td>{row.is_active ? 'Active' : 'Deactivated'}</td>
+                    <td>{row.assigned_job_count ?? 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
       <div className="table-wrap">
         <table>
           <thead>
@@ -56,6 +132,7 @@ export function AdminRecruitersPage() {
   const form = useForm()
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
+  const [pending, setPending] = useState(null)
   function load() {
     return api('/api/admin/recruiters', { token }).then(setRows)
   }
@@ -63,10 +140,12 @@ export function AdminRecruitersPage() {
     load().catch((err) => form.setError(err.message))
   }, [token])
   return (
-    <section className="stack">
+    <section className="stack dashboard-scene">
       <h1>Recruiters</h1>
+      <p className="lede">Admin-only directory. Deactivate access, or delete an account so the email can be reused. Hiring history is kept.</p>
+      <Message error={form.error} success={form.success} />
       <form
-        className="panel"
+        className="panel panel-premium"
         onSubmit={(e) => {
           e.preventDefault()
           form.run(async () => {
@@ -79,7 +158,6 @@ export function AdminRecruitersPage() {
         }}
       >
         <h2>Add recruiter</h2>
-        <Message error={form.error} success={form.success} />
         <Field label="Name">
           <input value={fullName} onChange={(e) => setFullName(e.target.value)} required />
         </Field>
@@ -97,7 +175,8 @@ export function AdminRecruitersPage() {
               <th>Name</th>
               <th>Email</th>
               <th>Status</th>
-              <th></th>
+              <th>Assigned jobs</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -106,27 +185,67 @@ export function AdminRecruitersPage() {
                 <td>{row.full_name}</td>
                 <td>{row.email}</td>
                 <td>{row.is_active ? 'Active' : 'Deactivated'}</td>
+                <td>{row.assigned_job_count ?? 0}</td>
                 <td>
-                  {row.is_active ? (
-                    <button
-                      type="button"
-                      className="text-btn"
-                      onClick={() =>
-                        form.run(async () => {
-                          await api(`/api/admin/recruiters/${row.id}/deactivate`, { method: 'POST', token })
-                          await load()
-                        })
-                      }
-                    >
-                      Deactivate
+                  <div className="actions">
+                    {row.is_active ? (
+                      <button type="button" className="text-btn" onClick={() => setPending({ type: 'deactivate', row })}>
+                        Deactivate
+                      </button>
+                    ) : (
+                      <span className="muted">Inactive</span>
+                    )}
+                    <button type="button" className="text-btn" onClick={() => setPending({ type: 'delete', row })}>
+                      Delete
                     </button>
-                  ) : null}
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {pending?.type === 'deactivate' ? (
+        <ConfirmDialog
+          title="Deactivate recruiter?"
+          message={`Deactivate ${pending.row.full_name} (${pending.row.email})? They will lose recruiter access. Job assignments will be cleared, but application notes and history stay in place. This cannot be undone from this screen.`}
+          confirmLabel="Deactivate recruiter"
+          busy={form.busy}
+          error={form.error}
+          onCancel={() => setPending(null)}
+          onConfirm={() =>
+            form.run(async () => {
+              await api(`/api/admin/recruiters/${pending.row.id}/deactivate`, { method: 'POST', token })
+              const id = pending.row.id
+              const name = pending.row.full_name
+              setPending(null)
+              form.setSuccess(`${name} has been deactivated.`)
+              setRows((cur) => cur.map((r) => (r.id === id ? { ...r, is_active: false, assigned_job_count: 0 } : r)))
+              await load()
+            })
+          }
+        />
+      ) : null}
+      {pending?.type === 'delete' ? (
+        <ConfirmDialog
+          title="Delete recruiter?"
+          message={`Are you sure you want to permanently delete ${pending.row.full_name} (${pending.row.email})? This will remove the recruiter account and make the email available for another recruiter. Historical hiring activity will be preserved.`}
+          confirmLabel="Delete Recruiter"
+          busy={form.busy}
+          error={form.error}
+          onCancel={() => setPending(null)}
+          onConfirm={() =>
+            form.run(async () => {
+              const id = pending.row.id
+              await api(`/api/admin/recruiters/${id}`, { method: 'DELETE', token })
+              setPending(null)
+              form.setSuccess('Recruiter deleted successfully.')
+              setRows((cur) => cur.filter((r) => r.id !== id))
+              await load()
+            })
+          }
+        />
+      ) : null}
     </section>
   )
 }
@@ -149,7 +268,7 @@ export function AdminJobsPage() {
       <Message error={error} />
       <div className="card-grid">
         {jobs.map((job) => (
-          <article className="card" key={job.id}>
+          <article className="card card-premium" key={job.id}>
             <p className="eyebrow">{job.status}</p>
             <h2>{job.title}</h2>
             <p>

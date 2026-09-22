@@ -157,6 +157,52 @@ export function RecruiterApplicationPage() {
           ) : null}
         </div>
         {closed && canReject ? <p className="muted">This job is closed. Remaining applications can only be rejected.</p> : null}
+        <div className="panel">
+          <h2>AI-generated summary</h2>
+          <p className="muted">Marked as AI-generated. Not shown to candidates. Uses the CV attached to this application.</p>
+          {row.ai_summary?.status === 'ready' ? (
+            <>
+              <h3>Profile</h3>
+              <ul>
+                {(row.ai_summary.profile_bullets || []).map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+              <h3>Requirements mentioned in the CV</h3>
+              <ul>
+                {(row.ai_summary.requirements_found || []).length ? (
+                  row.ai_summary.requirements_found.map((item) => <li key={item}>{item}</li>)
+                ) : (
+                  <li className="muted">None listed from this CV.</li>
+                )}
+              </ul>
+              <h3>Requirements not found</h3>
+              <ul>
+                {(row.ai_summary.requirements_missing || []).length ? (
+                  row.ai_summary.requirements_missing.map((item) => <li key={item}>{item}</li>)
+                ) : (
+                  <li className="muted">All listed requirements appear in the CV.</li>
+                )}
+              </ul>
+              <h3>Interview questions</h3>
+              <ol>
+                {(row.ai_summary.interview_questions || []).map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ol>
+            </>
+          ) : (
+            <>
+              <p>{row.ai_summary?.message || 'Summary not available'}</p>
+              <button
+                type="button"
+                onClick={() => act(`/api/applications/${id}/ai-summary/retry`)}
+              >
+                Try again
+              </button>
+            </>
+          )}
+        </div>
         {canInterview ? (
           <form
             className="panel"

@@ -74,6 +74,8 @@ class SupabaseStore:
                 return "This set-password link is invalid."
             if "not allowed" in text.lower():
                 return "You do not have permission to do that."
+            if "recruiter not found" in text.lower():
+                return "Recruiter not found."
             return text
         except Exception:
             return response.text or "The request could not be completed."
@@ -94,8 +96,14 @@ class SupabaseStore:
         return rows[0] if rows else None
 
     def get_profile_by_email(self, email: str) -> dict[str, Any] | None:
-        rows = self._rest("GET", "ats_profiles", params={"email": f"eq.{email.lower()}", "select": "*"})
-        return rows[0] if rows else None
+        target = email.lower()
+        rows = self._rest("GET", "ats_profiles", params={"email": f"eq.{target}", "select": "*", "limit": "1"}) or []
+        if not rows:
+            return None
+        row = rows[0]
+        if str(row.get("email") or "").lower() != target:
+            return None
+        return row
 
     def list_profiles(self, role: str | None = None) -> list[dict[str, Any]]:
         params = {"select": "*", "order": "created_at.desc"}
@@ -182,8 +190,12 @@ class SupabaseStore:
             json={"email": email.lower(), "token": token},
             headers={"Prefer": "resolution=merge-duplicates,return=representation"},
         )
-        joiner = "&" if "?" in redirect_to else "?"
-        return f"{redirect_to}{joiner}email={email.lower()}&token={token}"
+        from .links import encode_set_password_link
+        from urllib.parse import urlparse
+
+        parsed = urlparse(redirect_to)
+        origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else redirect_to.rsplit("/set-password", 1)[0]
+        return encode_set_password_link(origin, email, token)
 
     def set_password(self, email: str, token: str, password: str) -> dict[str, Any]:
         try:
@@ -286,6 +298,49 @@ class SupabaseStore:
     def job_recruiter_ids(self, job_id: str) -> list[str]:
         rows = self._rest("GET", "job_recruiters", params={"job_id": f"eq.{job_id}", "select": "recruiter_id"}) or []
         return [r["recruiter_id"] for r in rows]
+
+    def unassign_recruiter(self, recruiter_id: str) -> int:
+        links = self._rest("GET", "job_recruiters", params={"recruiter_id": f"eq.{recruiter_id}", "select": "job_id"}) or []
+        if links:
+            self._rest("DELETE", "job_recruiters", params={"recruiter_id": f"eq.{recruiter_id}"})
+        return len(links)
+
+    def purge_recruiter_account(self, recruiter_id: str, profile: dict[str, Any]) -> None:
+        try:
+            self._rpc("ats_delete_staff", {"p_id": recruiter_id})
+            return
+        except AppError as exc:
+            if "Could not find" in exc.message or "schema cache" in exc.message.lower():
+                pass
+            else:
+                raise
+        name = profile.get("full_name")
+        email = (profile.get("email") or "").lower()
+        snapshot = {"recruiter_name": name, "recruiter_email": email}
+        self._rest("PATCH", "recruiter_notes", params={"recruiter_id": f"eq.{recruiter_id}"}, json=snapshot)
+        self._rest("PATCH", "interviews", params={"recruiter_id": f"eq.{recruiter_id}"}, json=snapshot)
+        self._rest(
+            "PATCH",
+            "application_stage_events",
+            params={"changed_by": f"eq.{recruiter_id}"},
+            json={"changed_by_name": name},
+        )
+        self.unassign_recruiter(recruiter_id)
+        if not self.service_key:
+            raise AppError("Recruiter could not be deleted because the server is missing the service-role key.")
+        with self._client() as client:
+            response = client.delete(
+                f"{self.auth}/admin/users/{recruiter_id}",
+                headers={
+                    "apikey": self.service_key,
+                    "Authorization": f"Bearer {self.service_key}",
+                },
+            )
+        if response.status_code >= 400 and response.status_code != 404:
+            raise AppError(self._pretty_error(response), 400)
+        leftover = self.get_profile(recruiter_id)
+        if leftover:
+            self._rest("DELETE", "ats_profiles", params={"id": f"eq.{recruiter_id}"})
 
     def jobs_for_recruiter(self, recruiter_id: str) -> list[dict[str, Any]]:
         links = self._rest("GET", "job_recruiters", params={"recruiter_id": f"eq.{recruiter_id}", "select": "job_id"}) or []
@@ -440,3 +495,55 @@ class SupabaseStore:
                     total += 1
             rows.append({"job": job, "total_applied": total, "stages": stages})
         return rows
+
+    def get_cv_bytes(self, cv_id: str) -> bytes | None:
+        cv = self.get_cv(cv_id)
+        if not cv:
+            return None
+        path = cv.get("storage_path")
+        if not path:
+            return None
+        headers = self._headers()
+        headers.pop("Content-Type", None)
+        with self._client() as client:
+            response = client.get(f"{self.storage}/object/cvs/{path}", headers=headers)
+        if response.status_code >= 400:
+            return None
+        return response.content
+
+    def get_ai_summary(self, application_id: str) -> dict[str, Any] | None:
+        from .ai import as_json_list
+
+        rows = self._rest(
+            "GET",
+            "application_ai_summaries",
+            params={"application_id": f"eq.{application_id}", "select": "*"},
+        )
+        if not rows:
+            return None
+        row = dict(rows[0])
+        for key in ("profile_bullets", "requirements_found", "requirements_missing", "interview_questions"):
+            row[key] = as_json_list(row.get(key))
+        return row
+
+    def upsert_ai_summary(self, row: dict[str, Any]) -> dict[str, Any]:
+        payload = {
+            "application_id": row["application_id"],
+            "cv_id": row["cv_id"],
+            "status": row["status"],
+            "generated_by_ai": True,
+            "profile_bullets": row.get("profile_bullets") or [],
+            "requirements_found": row.get("requirements_found") or [],
+            "requirements_missing": row.get("requirements_missing") or [],
+            "interview_questions": row.get("interview_questions") or [],
+            "message": row.get("message"),
+        }
+        saved = self._rest(
+            "POST",
+            "application_ai_summaries",
+            json=payload,
+            headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
+        )
+        if saved:
+            return saved if isinstance(saved, dict) else payload
+        return payload

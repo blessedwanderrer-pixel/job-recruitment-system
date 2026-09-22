@@ -11,15 +11,12 @@ export async function api(path, { method = 'GET', token, body, form } = {}) {
   const headers = {}
   if (token) headers.Authorization = `Bearer ${token}`
   let payload
-        if (form) {
-          payload = form
-        } else if (body !== undefined) {
-          headers['Content-Type'] = 'application/json'
-          payload = JSON.stringify(body)
-        } else if (method !== 'GET') {
-          headers['Content-Type'] = 'application/json'
-          payload = '{}'
-        }
+  if (form) {
+    payload = form
+  } else if (body !== undefined) {
+    headers['Content-Type'] = 'application/json'
+    payload = JSON.stringify(body)
+  }
   const response = await fetch(`${API_URL}${path}`, { method, headers, body: payload })
   const text = await response.text()
   let data = null

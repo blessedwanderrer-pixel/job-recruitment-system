@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from . import ai
+from .config import settings
 from .errors import AppError
 from .mailer import Mailer
 from .rules import (
@@ -83,7 +85,41 @@ class HiringService:
             }
         if include_notes:
             payload["notes"] = self.store.list_notes(application["id"])
+            payload["ai_summary"] = self._staff_ai_summary(application)
         return payload
+
+    def _staff_ai_summary(self, application: dict[str, Any]) -> dict[str, Any] | None:
+        try:
+            row = self.store.get_ai_summary(application["id"])
+        except Exception:
+            row = None
+        if not row:
+            self._generate_ai_summary(application)
+            try:
+                row = self.store.get_ai_summary(application["id"])
+            except Exception:
+                row = None
+        return ai.public_staff_summary(row)
+
+    def _generate_ai_summary(self, application: dict[str, Any], job: dict[str, Any] | None = None) -> None:
+        job = job or self.store.get_job(application["job_id"])
+        try:
+            data = self.store.get_cv_bytes(application["cv_id"]) or b""
+            text = ai.extract_pdf_text(data)
+            summary = ai.build_ai_summary(
+                job or {},
+                text,
+                application["cv_id"],
+                force_fail=bool(settings.ats_ai_force_fail),
+            )
+            self.store.upsert_ai_summary(ai.row_from_summary(application["id"], summary))
+        except Exception:
+            try:
+                self.store.upsert_ai_summary(
+                    ai.row_from_summary(application["id"], ai.failed_summary(application.get("cv_id")))
+                )
+            except Exception:
+                pass
 
     def me(self, actor: dict[str, Any]) -> dict[str, Any]:
         profile = dict(actor)
@@ -136,7 +172,20 @@ class HiringService:
 
     def list_recruiters(self, actor: dict[str, Any]) -> list[dict[str, Any]]:
         require_role(actor, ADMIN)
-        return self.store.list_profiles(RECRUITER)
+        rows = []
+        for profile in self.store.list_profiles(RECRUITER):
+            assigned = self.store.jobs_for_recruiter(profile["id"])
+            rows.append(
+                {
+                    "id": profile["id"],
+                    "full_name": profile["full_name"],
+                    "email": profile["email"],
+                    "role": profile["role"],
+                    "is_active": profile.get("is_active", True),
+                    "assigned_job_count": len(assigned),
+                }
+            )
+        return rows
 
     def create_recruiter(self, actor: dict[str, Any], full_name: str, email: str) -> dict[str, Any]:
         require_role(actor, ADMIN)
@@ -144,6 +193,9 @@ class HiringService:
             raise AppError("Name and email are required.")
         if self.store.get_profile_by_email(email.strip()):
             raise AppError("An account with this email already exists.")
+        from .links import require_public_email_origin, recruiter_set_password_path
+
+        origin = require_public_email_origin()
         password = f"Tmp-{user_token()}"
         user = self.store.create_auth_user(
             email=email.strip().lower(),
@@ -161,19 +213,64 @@ class HiringService:
                 "is_active": True,
             }
         )
-        from .config import settings
-
-        link = self.store.generate_recovery_link(profile["email"], f"{settings.frontend_url}/set-password")
-        self.mailer.send("recruiter_invite", profile, extra={"set_password_link": link, "full_name": profile["full_name"]})
-        return profile
+        link = self.store.generate_recovery_link(profile["email"], recruiter_set_password_path(origin))
+        self.mailer.send(
+            "recruiter_invite",
+            profile,
+            extra={
+                "set_password_link": link,
+                "frontend_public_url": origin,
+                "full_name": profile["full_name"],
+            },
+        )
+        return {
+            "id": profile["id"],
+            "full_name": profile["full_name"],
+            "email": profile["email"],
+            "role": profile["role"],
+            "is_active": profile.get("is_active", True),
+            "assigned_job_count": 0,
+        }
 
     def deactivate_recruiter(self, actor: dict[str, Any], recruiter_id: str) -> dict[str, Any]:
         require_role(actor, ADMIN)
+        if recruiter_id == actor["id"]:
+            raise AppError("You cannot deactivate your own account.")
         profile = self.store.get_profile(recruiter_id)
         if not profile or profile["role"] != RECRUITER:
             raise AppError("Recruiter not found.", 404)
+        if profile.get("role") == ADMIN:
+            raise AppError("Admin accounts cannot be deactivated here.")
         profile["is_active"] = False
-        return self.store.upsert_profile(profile)
+        updated = self.store.upsert_profile(profile)
+        self.store.unassign_recruiter(recruiter_id)
+        assigned = self.store.jobs_for_recruiter(updated["id"])
+        return {
+            "id": updated["id"],
+            "full_name": updated["full_name"],
+            "email": updated["email"],
+            "role": updated["role"],
+            "is_active": updated.get("is_active", False),
+            "assigned_job_count": len(assigned),
+        }
+
+    def delete_recruiter(self, actor: dict[str, Any], recruiter_id: str) -> dict[str, Any]:
+        require_role(actor, ADMIN)
+        if recruiter_id == actor["id"]:
+            raise AppError("You cannot delete your own admin account.")
+        profile = self.store.get_profile(recruiter_id)
+        if not profile or profile["role"] != RECRUITER:
+            raise AppError("Recruiter not found.", 404)
+        if profile.get("role") == ADMIN:
+            raise AppError("You cannot delete your own admin account.")
+        removed = {
+            "id": profile["id"],
+            "full_name": profile["full_name"],
+            "email": profile["email"],
+            "deleted": True,
+        }
+        self.store.purge_recruiter_account(recruiter_id, profile)
+        return removed
 
     def upload_cv(self, actor: dict[str, Any], filename: str, content_type: str | None, data: bytes) -> dict[str, Any]:
         require_role(actor, CANDIDATE)
@@ -290,7 +387,11 @@ class HiringService:
             application["id"],
             extra={"job_title": job["title"]},
         )
-        return self._enrich_application(application, include_notes=False, include_candidate=False)
+        self._generate_ai_summary(application, job)
+        try:
+            return self._enrich_application(application, include_notes=False, include_candidate=False)
+        except Exception:
+            return {**application, "job": job}
 
     def my_applications(self, actor: dict[str, Any]) -> list[dict[str, Any]]:
         require_role(actor, CANDIDATE)
@@ -331,13 +432,28 @@ class HiringService:
             raise AppError("CV not found.", 404)
         return self.store.signed_cv_url(cv["storage_path"])
 
+    def retry_ai_summary(self, actor: dict[str, Any], application_id: str) -> dict[str, Any]:
+        require_role(actor, RECRUITER, ADMIN)
+        application = self._application(application_id)
+        self._assert_recruiter_job_access(actor, application["job_id"])
+        self._generate_ai_summary(application)
+        return self.get_application(actor, application_id)
+
     def add_note(self, actor: dict[str, Any], application_id: str, body: str) -> dict[str, Any]:
         require_role(actor, RECRUITER)
         if not body.strip():
             raise AppError("Note cannot be empty.")
         application = self._application(application_id)
         self._assert_recruiter_job_access(actor, application["job_id"])
-        return self.store.add_note({"application_id": application_id, "recruiter_id": actor["id"], "body": body.strip()})
+        return self.store.add_note(
+            {
+                "application_id": application_id,
+                "recruiter_id": actor["id"],
+                "body": body.strip(),
+                "recruiter_name": actor.get("full_name"),
+                "recruiter_email": actor.get("email"),
+            }
+        )
 
     def advance(self, actor: dict[str, Any], application_id: str, to_stage: str | None = None) -> dict[str, Any]:
         require_role(actor, RECRUITER)
@@ -382,6 +498,8 @@ class HiringService:
             {
                 "application_id": application_id,
                 "recruiter_id": actor["id"],
+                "recruiter_name": actor.get("full_name"),
+                "recruiter_email": actor.get("email"),
                 "starts_at": starts_at,
                 "location": location or None,
                 "meeting_link": meeting_link or None,
@@ -410,12 +528,14 @@ class HiringService:
 
     def _move(self, application: dict[str, Any], to_stage: str, actor_id: str) -> dict[str, Any]:
         updated = self.store.update_application(application["id"], {"stage": to_stage})
+        changer = self.store.get_profile(actor_id)
         self.store.add_stage_event(
             {
                 "application_id": application["id"],
                 "from_stage": application["stage"],
                 "to_stage": to_stage,
                 "changed_by": actor_id,
+                "changed_by_name": (changer or {}).get("full_name"),
             }
         )
         return updated

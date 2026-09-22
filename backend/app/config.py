@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     supabase_anon_key: str = ""
     supabase_service_role_key: str = ""
     frontend_url: str = "http://127.0.0.1:5173"
+    frontend_public_url: str = ""
     n8n_webhook_url: str = ""
     n8n_internal_secret: str = Field(..., min_length=1)
     admin_email: str = "admin@nowsheradigital.com"
@@ -16,6 +17,7 @@ class Settings(BaseSettings):
     admin_name: str = "Hiring Manager"
     admin_phone: str = ""
     ats_use_memory: bool = False
+    ats_ai_force_fail: bool = False
 
 
 try:

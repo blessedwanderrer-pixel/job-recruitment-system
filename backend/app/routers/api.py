@@ -98,6 +98,11 @@ def deactivate_recruiter(recruiter_id: str, actor: dict[str, Any] = Depends(get_
     return service.deactivate_recruiter(actor, recruiter_id)
 
 
+@router.delete("/admin/recruiters/{recruiter_id}")
+def delete_recruiter(recruiter_id: str, actor: dict[str, Any] = Depends(get_current_user), service: HiringService = Depends(get_service)):
+    return service.delete_recruiter(actor, recruiter_id)
+
+
 @router.post("/cvs")
 async def upload_cv(
     file: UploadFile = File(...),
@@ -166,6 +171,11 @@ def application_cv(application_id: str, actor: dict[str, Any] = Depends(get_curr
 @router.post("/applications/{application_id}/withdraw")
 def withdraw(application_id: str, actor: dict[str, Any] = Depends(get_current_user), service: HiringService = Depends(get_service)):
     return service.withdraw(actor, application_id)
+
+
+@router.post("/applications/{application_id}/ai-summary/retry")
+def retry_ai_summary(application_id: str, actor: dict[str, Any] = Depends(get_current_user), service: HiringService = Depends(get_service)):
+    return service.retry_ai_summary(actor, application_id)
 
 
 @router.post("/applications/{application_id}/notes")

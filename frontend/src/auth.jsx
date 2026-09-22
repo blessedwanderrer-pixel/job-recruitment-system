@@ -14,10 +14,11 @@ export function AuthProvider({ children }) {
   async function loadProfile(nextSession) {
     if (!nextSession?.access_token) {
       setProfile(null)
-      return
+      return null
     }
     const me = await api('/api/me', { token: nextSession.access_token })
     setProfile(me)
+    return me
   }
 
   function remember(token) {
@@ -49,6 +50,8 @@ export function AuthProvider({ children }) {
         if (alive) {
           setError(err.message)
           localStorage.removeItem(TOKEN_KEY)
+          setSession(null)
+          setProfile(null)
         }
       } finally {
         if (alive) setLoading(false)
@@ -63,6 +66,9 @@ export function AuthProvider({ children }) {
         else setProfile(null)
       } catch (err) {
         setError(err.message)
+        setSession(null)
+        setProfile(null)
+        localStorage.removeItem(TOKEN_KEY)
       }
     })
     return () => {
@@ -72,16 +78,29 @@ export function AuthProvider({ children }) {
   }, [])
 
   async function signIn(email, password) {
-    if (MEMORY) {
-      const data = await api('/api/auth/login', { method: 'POST', body: { email, password } })
-      await loadProfile(remember(data.token))
-      return
+    try {
+      if (MEMORY) {
+        const data = await api('/api/auth/login', { method: 'POST', body: { email, password } })
+        return await loadProfile(remember(data.token))
+      }
+      if (!supabase) throw new Error('Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.')
+      const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password })
+      if (authError) throw new Error(authError.message)
+      setSession(data.session)
+      return await loadProfile(data.session)
+    } catch (err) {
+      localStorage.removeItem(TOKEN_KEY)
+      setSession(null)
+      setProfile(null)
+      if (supabase && !MEMORY) {
+        try {
+          await supabase.auth.signOut()
+        } catch {
+          /* session may never have been stored */
+        }
+      }
+      throw err
     }
-    if (!supabase) throw new Error('Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.')
-    const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password })
-    if (authError) throw new Error(authError.message)
-    setSession(data.session)
-    await loadProfile(data.session)
   }
 
   async function signUp(payload) {

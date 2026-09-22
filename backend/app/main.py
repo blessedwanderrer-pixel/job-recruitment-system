@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from .config import settings
 from .deps import get_service
 from .errors import AppError
+from .links import frontend_email_origin
 from .routers.api import router as api_router
 from .routers.internal import router as internal_router
 from .rules import ADMIN
@@ -41,13 +42,21 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Nowshera Digital ATS", version="1.0.0", lifespan=lifespan)
+    public_origin = frontend_email_origin()
+    allow_origins = [
+        settings.frontend_url,
+        public_origin,
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:5175",
+        "http://127.0.0.1:5175",
+    ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            settings.frontend_url,
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-        ],
+        allow_origins=[origin for origin in allow_origins if origin],
+        allow_origin_regex=r"(http://(localhost|127\.0\.0\.1):\d+|https://[a-z0-9-]+\.trycloudflare\.com)",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

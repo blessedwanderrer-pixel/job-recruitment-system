@@ -39,6 +39,8 @@ class Store(Protocol):
     def set_job_recruiters(self, job_id: str, recruiter_ids: list[str]) -> list[str]: ...
     def job_recruiter_ids(self, job_id: str) -> list[str]: ...
     def jobs_for_recruiter(self, recruiter_id: str) -> list[dict[str, Any]]: ...
+    def unassign_recruiter(self, recruiter_id: str) -> int: ...
+    def purge_recruiter_account(self, recruiter_id: str, profile: dict[str, Any]) -> None: ...
     def create_application(self, application: dict[str, Any]) -> dict[str, Any]: ...
     def get_application(self, application_id: str) -> dict[str, Any] | None: ...
     def list_applications(self, job_id: str | None = None, candidate_id: str | None = None) -> list[dict[str, Any]]: ...
@@ -55,6 +57,9 @@ class Store(Protocol):
     def list_email_deliveries(self) -> list[dict[str, Any]]: ...
     def hired_count(self, job_id: str) -> int: ...
     def dashboard_rows(self) -> list[dict[str, Any]]: ...
+    def get_cv_bytes(self, cv_id: str) -> bytes | None: ...
+    def get_ai_summary(self, application_id: str) -> dict[str, Any] | None: ...
+    def upsert_ai_summary(self, row: dict[str, Any]) -> dict[str, Any]: ...
 
 
 class MemoryStore:
@@ -71,6 +76,7 @@ class MemoryStore:
         self.interviews: dict[str, dict[str, Any]] = {}
         self.emails: list[dict[str, Any]] = []
         self.recovery_links: dict[str, str] = {}
+        self.ai_summaries: dict[str, dict[str, Any]] = {}
 
     def get_profile(self, user_id: str) -> dict[str, Any] | None:
         row = self.profiles.get(user_id)
@@ -127,7 +133,12 @@ class MemoryStore:
 
     def generate_recovery_link(self, email: str, redirect_to: str) -> str:
         token = uuid.uuid4().hex
-        link = f"{redirect_to}?email={email}&token={token}"
+        from .links import encode_set_password_link
+        from urllib.parse import urlparse
+
+        parsed = urlparse(redirect_to)
+        origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else redirect_to.rsplit("/set-password", 1)[0]
+        link = encode_set_password_link(origin, email, token)
         self.recovery_links[email.lower()] = link
         return link
 
@@ -208,6 +219,40 @@ class MemoryStore:
     def jobs_for_recruiter(self, recruiter_id: str) -> list[dict[str, Any]]:
         ids = [jid for jid, recs in self.job_recruiters.items() if recruiter_id in recs]
         return deepcopy([self.jobs[jid] for jid in ids if jid in self.jobs])
+
+    def unassign_recruiter(self, recruiter_id: str) -> int:
+        removed = 0
+        for job_id, recs in list(self.job_recruiters.items()):
+            if recruiter_id in recs:
+                self.job_recruiters[job_id] = [rid for rid in recs if rid != recruiter_id]
+                removed += 1
+        return removed
+
+    def purge_recruiter_account(self, recruiter_id: str, profile: dict[str, Any]) -> None:
+        name = profile.get("full_name")
+        email = (profile.get("email") or "").lower()
+        for note in self.notes:
+            if note.get("recruiter_id") == recruiter_id:
+                note["recruiter_name"] = note.get("recruiter_name") or name
+                note["recruiter_email"] = note.get("recruiter_email") or email
+                note["recruiter_id"] = None
+        for interview in self.interviews.values():
+            if interview.get("recruiter_id") == recruiter_id:
+                interview["recruiter_name"] = interview.get("recruiter_name") or name
+                interview["recruiter_email"] = interview.get("recruiter_email") or email
+                interview["recruiter_id"] = None
+        for event in self.stage_events:
+            if event.get("changed_by") == recruiter_id:
+                event["changed_by_name"] = event.get("changed_by_name") or name
+                event["changed_by"] = None
+        for row in self.emails:
+            if row.get("recipient_user_id") == recruiter_id:
+                row["recipient_user_id"] = None
+        self.unassign_recruiter(recruiter_id)
+        self.passwords.pop(recruiter_id, None)
+        self.profiles.pop(recruiter_id, None)
+        if email:
+            self.recovery_links.pop(email, None)
 
     def create_application(self, application: dict[str, Any]) -> dict[str, Any]:
         if self.active_application(application["candidate_id"], application["job_id"]):
@@ -351,3 +396,18 @@ class MemoryStore:
             )
         rows.sort(key=lambda r: r["job"]["created_at"], reverse=True)
         return rows
+
+    def get_cv_bytes(self, cv_id: str) -> bytes | None:
+        return self.cv_bytes.get(cv_id)
+
+    def get_ai_summary(self, application_id: str) -> dict[str, Any] | None:
+        row = self.ai_summaries.get(application_id)
+        return deepcopy(row) if row else None
+
+    def upsert_ai_summary(self, row: dict[str, Any]) -> dict[str, Any]:
+        stored = deepcopy(row)
+        stored["updated_at"] = _now_iso()
+        stored.setdefault("created_at", _now_iso())
+        stored.setdefault("generated_by_ai", True)
+        self.ai_summaries[row["application_id"]] = stored
+        return deepcopy(stored)

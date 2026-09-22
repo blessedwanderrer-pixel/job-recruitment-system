@@ -12,14 +12,20 @@ os.environ["ATS_USE_MEMORY"] = "true"
 os.environ["N8N_WEBHOOK_URL"] = ""
 os.environ.setdefault("ADMIN_PASSWORD", "Admin123!")
 os.environ.setdefault("N8N_INTERNAL_SECRET", "test-n8n-internal-secret")
+os.environ.setdefault("FRONTEND_PUBLIC_URL", "https://ats.example.test")
 
 from app.deps import reset_runtime  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.rules import ADMIN, CANDIDATE, RECRUITER  # noqa: E402
 
 
+def cv_pdf(text: str) -> bytes:
+    safe = text.replace("(", "\\(").replace(")", "\\)")
+    return b"%PDF-1.4\n(" + safe.encode("latin-1", errors="replace") + b")\n%%EOF\n"
+
+
 def tiny_pdf() -> bytes:
-    return b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<<>>\n%%EOF\n"
+    return cv_pdf("Experienced Python developer. Built REST APIs and PostgreSQL databases for production systems.")
 
 
 def big_pdf() -> bytes:
@@ -39,6 +45,7 @@ def ctx():
 
     config.settings.ats_use_memory = True
     config.settings.n8n_webhook_url = ""
+    config.settings.frontend_public_url = os.environ.get("FRONTEND_PUBLIC_URL", "https://ats.example.test")
     app = create_app()
     client = TestClient(app)
     from app.deps import get_service
@@ -77,7 +84,7 @@ def last_date(days=14) -> str:
     return (datetime.now(timezone.utc).date() + timedelta(days=days)).isoformat()
 
 
-def create_open_job(client, admin_id, recruiter_id, openings=2, title="Backend Developer"):
+def create_open_job(client, admin_id, recruiter_id, openings=2, title="Backend Developer", requirements="Python. REST APIs. PostgreSQL."):
     job = client.post(
         "/api/admin/jobs",
         headers=auth(admin_id),
@@ -87,7 +94,7 @@ def create_open_job(client, admin_id, recruiter_id, openings=2, title="Backend D
             "location": "Nowshera",
             "job_type": "full_time",
             "description": "Build APIs.",
-            "requirements": "Python.",
+            "requirements": requirements,
             "last_date_to_apply": last_date(),
             "openings": openings,
         },
