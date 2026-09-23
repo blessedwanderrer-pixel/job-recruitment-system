@@ -5,10 +5,13 @@ from conftest import (
     big_pdf,
     create_open_job,
     cv_pdf,
+    empty_pdf,
     future_slot,
+    image_only_pdf,
     last_date,
     make_candidate,
     make_recruiter,
+    text_pdf,
     tiny_pdf,
     upload_and_apply,
 )
@@ -464,36 +467,64 @@ def test_14_private_summary(ctx):
     assert cand_retry.status_code in (403, 404)
 
 
-def test_extract_pdf_skips_raw_binary_and_empty_text_is_ready():
+def test_extract_pdf_text_uses_pdf_structure_and_normalizes_output():
     import json
 
     from app.ai import build_ai_summary, extract_pdf_text
 
-    readable = b"%PDF-1.4\n(Python developer who shipped APIs)\n%%EOF\n"
+    readable = text_pdf("Python developer who shipped APIs")
     text = extract_pdf_text(readable)
-    assert "Python" in text
+    assert text == "Python developer who shipped APIs"
     assert "\x00" not in text
+
+    chromium_like = text_pdf(
+        "Built production APIs with Python. Worked with PostgreSQL.",
+        compressed=True,
+        producer="Skia/PDF m123 Chromium",
+    )
+    compressed_text = extract_pdf_text(chromium_like)
+    assert "Built production APIs with Python." in compressed_text
+    assert "Worked with PostgreSQL." in compressed_text
+    for raw_structure in ("endstream", "endobj", "xref", "FlateDecode", "Skia/PDF", "Chromium"):
+        assert raw_structure not in compressed_text
+
+    controls = text_pdf("Python\x00 developer\x01 with\t APIs")
+    clean = extract_pdf_text(controls)
+    assert "\x00" not in clean
+    assert "\x01" not in clean
+    assert "Python developer with APIs" in clean
+
     ready = build_ai_summary({"title": "Backend", "requirements": "Python. APIs."}, text, "cv-readable")
     assert ready["status"] == "ready"
     assert "\\u0000" not in json.dumps(ready)
 
-    binary = b"%PDF-1.4\n" + b"\x00\x01stream\xff" * 80 + b"\n%%EOF\n"
-    empty = extract_pdf_text(binary)
-    assert empty == ""
-    fallback = build_ai_summary({"title": "Backend", "requirements": "Python"}, empty, "cv-binary")
+
+def test_extract_pdf_text_returns_empty_for_unusable_pdfs_and_summary_falls_back():
+    import json
+
+    from app.ai import build_ai_summary, extract_pdf_text
+
+    malformed = b"%PDF-1.7\n" + b"\x00\x01stream\xff(endobj xref Skia/PDF)" * 80
+    assert extract_pdf_text(malformed) == ""
+    assert extract_pdf_text(empty_pdf()) == ""
+    assert extract_pdf_text(image_only_pdf()) == ""
+    assert extract_pdf_text(b"") == ""
+
+    fallback = build_ai_summary({"title": "Backend", "requirements": "Python"}, "", "cv-binary")
     assert fallback["status"] == "ready"
     assert len(fallback["profile_bullets"]) >= 3
     encoded = json.dumps(fallback)
     assert "\\u0000" not in encoded
+    assert "endobj" not in encoded
+    assert "Skia/PDF" not in encoded
 
 
-def test_binary_cv_apply_persists_ready_summary(ctx):
+def test_empty_cv_apply_persists_ready_summary(ctx):
     client, service, admin = ctx["client"], ctx["service"], ctx["admin"]
     recruiter = make_recruiter(service, "ai-bin-rec@test.com")
     candidate = make_candidate(service, "ai-bin-cand@test.com", "Binary CV")
     job = create_open_job(client, admin["id"], recruiter["id"], title="Binary CV Job")
-    binary = b"%PDF-1.4\n" + b"\x00\x01stream\xff" * 80 + b"\n%%EOF\n"
-    _, applied = upload_and_apply(client, candidate["id"], job["id"], data=binary)
+    _, applied = upload_and_apply(client, candidate["id"], job["id"], data=empty_pdf())
     assert applied.status_code == 200, applied.text
     staff = client.get(f"/api/applications/{applied.json()['id']}", headers=auth(recruiter["id"]))
     assert staff.status_code == 200, staff.text
@@ -501,3 +532,6 @@ def test_binary_cv_apply_persists_ready_summary(ctx):
     assert summary["status"] == "ready"
     assert summary.get("message") is None
     assert len(summary["profile_bullets"]) >= 3
+    persisted = service.store.get_ai_summary(applied.json()["id"])
+    assert persisted is not None
+    assert persisted["status"] == "ready"

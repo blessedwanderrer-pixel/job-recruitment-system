@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import re
+from io import BytesIO
 from typing import Any
+
+from pypdf import PdfReader
 
 FORBIDDEN_TERMS = (
     r"\bage\b",
@@ -44,23 +47,36 @@ def _strip_unsafe_chars(value: str) -> str:
     return _UNSAFE_CHARS.sub("", value or "")
 
 
+def _normalize_pdf_text(value: str) -> str:
+    text = _strip_unsafe_chars(value).replace("\r\n", "\n").replace("\r", "\n")
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.split("\n")]
+    normalized = "\n".join(lines)
+    return re.sub(r"\n{3,}", "\n\n", normalized).strip()
+
+
 def extract_pdf_text(data: bytes) -> str:
     if not data:
         return ""
-    chunks = re.findall(rb"\((?:\\.|[^\\)])*\)", data)
-    parts = []
-    for raw in chunks:
-        try:
-            text = raw[1:-1].decode("latin-1")
-        except Exception:
-            continue
-        text = text.replace("\\n", " ").replace("\\r", " ").replace("\\(", "(").replace("\\)", ")")
-        text = _strip_unsafe_chars(text)
-        if text.strip():
-            parts.append(text)
-    if parts:
-        return " ".join(parts)
-    return ""
+
+    try:
+        reader = PdfReader(BytesIO(data), strict=False)
+        if reader.is_encrypted and not reader.decrypt(""):
+            return ""
+    except Exception:
+        return ""
+
+    pages = []
+    try:
+        for page in reader.pages:
+            try:
+                text = _normalize_pdf_text(page.extract_text() or "")
+            except Exception:
+                continue
+            if text:
+                pages.append(text)
+    except Exception:
+        return ""
+    return "\n\n".join(pages)
 
 
 DEMOGRAPHIC_LINE = re.compile(

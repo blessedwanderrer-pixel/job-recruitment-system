@@ -5,4 +5,5 @@ pydantic[email]
 pydantic-settings
 httpx
 python-dotenv
+pypdf==6.19.0
 pytest

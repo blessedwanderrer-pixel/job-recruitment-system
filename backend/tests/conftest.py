@@ -1,5 +1,6 @@
 import os
 import sys
+import zlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -20,8 +21,73 @@ from app.rules import ADMIN, CANDIDATE, RECRUITER  # noqa: E402
 
 
 def cv_pdf(text: str) -> bytes:
-    safe = text.replace("(", "\\(").replace(")", "\\)")
-    return b"%PDF-1.4\n(" + safe.encode("latin-1", errors="replace") + b")\n%%EOF\n"
+    return text_pdf(text)
+
+
+def text_pdf(text: str, *, compressed: bool = False, producer: str = "ATS test fixture") -> bytes:
+    safe = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    content = f"BT\n/F1 12 Tf\n72 720 Td\n({safe}) Tj\nET\n".encode("latin-1", errors="replace")
+    stream = zlib.compress(content) if compressed else content
+    stream_dict = f"<< /Length {len(stream)}" + (" /Filter /FlateDecode" if compressed else "") + " >>"
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+        stream_dict.encode("ascii") + b"\nstream\n" + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        f"<< /Producer ({producer}) >>".encode("latin-1", errors="replace"),
+    ]
+    return _pdf_with_xref(objects, info_object=6)
+
+
+def empty_pdf() -> bytes:
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> >>",
+    ]
+    return _pdf_with_xref(objects)
+
+
+def image_only_pdf() -> bytes:
+    image = zlib.compress(b"\x80")
+    content = zlib.compress(b"q 100 0 0 100 72 600 cm /Im1 Do Q")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /Im1 5 0 R >> >> /Contents 4 0 R >>",
+        f"<< /Length {len(content)} /Filter /FlateDecode >>".encode("ascii")
+        + b"\nstream\n"
+        + content
+        + b"\nendstream",
+        (
+            f"<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray "
+            f"/BitsPerComponent 8 /Filter /FlateDecode /Length {len(image)} >>"
+        ).encode("ascii")
+        + b"\nstream\n"
+        + image
+        + b"\nendstream",
+    ]
+    return _pdf_with_xref(objects)
+
+
+def _pdf_with_xref(objects: list[bytes], info_object: int | None = None) -> bytes:
+    pdf = bytearray(b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n")
+    offsets = [0]
+    for number, obj in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf.extend(f"{number} 0 obj\n".encode("ascii"))
+        pdf.extend(obj)
+        pdf.extend(b"\nendobj\n")
+    xref = len(pdf)
+    pdf.extend(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode("ascii"))
+    for offset in offsets[1:]:
+        pdf.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    info = f" /Info {info_object} 0 R" if info_object else ""
+    pdf.extend(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R{info} >>\nstartxref\n{xref}\n%%EOF\n".encode("ascii")
+    )
+    return bytes(pdf)
 
 
 def tiny_pdf() -> bytes:
