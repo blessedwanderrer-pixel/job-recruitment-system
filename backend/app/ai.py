@@ -37,6 +37,11 @@ INSTRUCTION_LINE = re.compile(
     r"ignore (all )?(your |the )?instructions|must be hired|recommend (hiring|rejection)",
     re.I,
 )
+_UNSAFE_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _strip_unsafe_chars(value: str) -> str:
+    return _UNSAFE_CHARS.sub("", value or "")
 
 
 def extract_pdf_text(data: bytes) -> str:
@@ -50,14 +55,12 @@ def extract_pdf_text(data: bytes) -> str:
         except Exception:
             continue
         text = text.replace("\\n", " ").replace("\\r", " ").replace("\\(", "(").replace("\\)", ")")
+        text = _strip_unsafe_chars(text)
         if text.strip():
             parts.append(text)
     if parts:
         return " ".join(parts)
-    try:
-        return data.decode("latin-1", errors="ignore")
-    except Exception:
-        return ""
+    return ""
 
 
 DEMOGRAPHIC_LINE = re.compile(
@@ -78,7 +81,7 @@ def _clean_cv_text(cv_text: str) -> str:
 
 
 def _sanitize_phrase(value: str) -> str:
-    text = re.sub(r"\s+", " ", value).strip()
+    text = _strip_unsafe_chars(re.sub(r"\s+", " ", value).strip())
     for pattern in FORBIDDEN_TERMS:
         text = re.sub(pattern, "", text, flags=re.I)
     text = re.sub(r"\s+", " ", text).strip(" ,;.-")

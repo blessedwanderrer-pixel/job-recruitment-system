@@ -462,3 +462,42 @@ def test_14_private_summary(ctx):
     assert retry.status_code in (403, 404)
     cand_retry = client.post(f"/api/applications/{app_id}/ai-summary/retry", headers=auth(candidate["id"]))
     assert cand_retry.status_code in (403, 404)
+
+
+def test_extract_pdf_skips_raw_binary_and_empty_text_is_ready():
+    import json
+
+    from app.ai import build_ai_summary, extract_pdf_text
+
+    readable = b"%PDF-1.4\n(Python developer who shipped APIs)\n%%EOF\n"
+    text = extract_pdf_text(readable)
+    assert "Python" in text
+    assert "\x00" not in text
+    ready = build_ai_summary({"title": "Backend", "requirements": "Python. APIs."}, text, "cv-readable")
+    assert ready["status"] == "ready"
+    assert "\\u0000" not in json.dumps(ready)
+
+    binary = b"%PDF-1.4\n" + b"\x00\x01stream\xff" * 80 + b"\n%%EOF\n"
+    empty = extract_pdf_text(binary)
+    assert empty == ""
+    fallback = build_ai_summary({"title": "Backend", "requirements": "Python"}, empty, "cv-binary")
+    assert fallback["status"] == "ready"
+    assert len(fallback["profile_bullets"]) >= 3
+    encoded = json.dumps(fallback)
+    assert "\\u0000" not in encoded
+
+
+def test_binary_cv_apply_persists_ready_summary(ctx):
+    client, service, admin = ctx["client"], ctx["service"], ctx["admin"]
+    recruiter = make_recruiter(service, "ai-bin-rec@test.com")
+    candidate = make_candidate(service, "ai-bin-cand@test.com", "Binary CV")
+    job = create_open_job(client, admin["id"], recruiter["id"], title="Binary CV Job")
+    binary = b"%PDF-1.4\n" + b"\x00\x01stream\xff" * 80 + b"\n%%EOF\n"
+    _, applied = upload_and_apply(client, candidate["id"], job["id"], data=binary)
+    assert applied.status_code == 200, applied.text
+    staff = client.get(f"/api/applications/{applied.json()['id']}", headers=auth(recruiter["id"]))
+    assert staff.status_code == 200, staff.text
+    summary = staff.json()["ai_summary"]
+    assert summary["status"] == "ready"
+    assert summary.get("message") is None
+    assert len(summary["profile_bullets"]) >= 3

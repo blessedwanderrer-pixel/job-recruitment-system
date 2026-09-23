@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -25,6 +26,8 @@ from .rules import (
     utcnow,
     validate_cv_file,
 )
+
+_log = logging.getLogger(__name__)
 
 
 class HiringService:
@@ -114,12 +117,21 @@ class HiringService:
             )
             self.store.upsert_ai_summary(ai.row_from_summary(application["id"], summary))
         except Exception:
+            _log.exception(
+                "AI summary generation failed application_id=%s cv_id=%s",
+                application.get("id"),
+                application.get("cv_id"),
+            )
             try:
                 self.store.upsert_ai_summary(
                     ai.row_from_summary(application["id"], ai.failed_summary(application.get("cv_id")))
                 )
             except Exception:
-                pass
+                _log.exception(
+                    "AI summary fallback persist failed application_id=%s cv_id=%s",
+                    application.get("id"),
+                    application.get("cv_id"),
+                )
 
     def me(self, actor: dict[str, Any]) -> dict[str, Any]:
         profile = dict(actor)
